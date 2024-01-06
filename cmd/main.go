@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/xkmsoft/sudoku-solver/pkg/solver"
+	"github.com/chasankm/sudoku-solver/pkg/solver"
 	"log"
 )
 

@@ -1,4 +1,4 @@
-module github.com/xkmsoft/sudoku-solver
+module github.com/chasankm/sudoku-solver
 
 go 1.21
 
