@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"errors"
 	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"strconv"
@@ -35,6 +36,26 @@ var Levels = map[Difficulty]string{
 	Evil:   "Evil",
 }
 
+type Strategy string
+
+const (
+	NakedQuadsStrategy     Strategy = "Naked Quads"
+	NakedTriplesStrategy   Strategy = "Naked Triples"
+	NakedPairsStrategy     Strategy = "Naked Pairs"
+	XYWingsStrategy        Strategy = "XY Wings"
+	XYZWingsStrategy       Strategy = "XYZ Wings"
+	XWingsStrategy         Strategy = "X Wings"
+	SwordFishStrategy      Strategy = "Sword Fish"
+	HiddenSingleStrategy   Strategy = "Hidden Single"
+	HiddenQuadsStrategy    Strategy = "Hidden Quads"
+	HiddenTripletsStrategy Strategy = "Hidden Triplets"
+	HiddenPairsStrategy    Strategy = "Hidden Pairs"
+)
+
+func (s Strategy) ToString() string {
+	return string(s)
+}
+
 var Digits = roaring.BitmapOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
 
 var ValidInputs = roaring.BitmapOf(uint32(EmptyCellValue), 1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -55,10 +76,12 @@ var HexMap = map[byte]Value{
 
 // Board is the struct of the Sudoku board
 type Board struct {
-	data          [BoardSize][BoardSize]*Cell
-	difficulty    Difficulty
-	givens        int
-	backTrackUsed bool
+	data           [BoardSize][BoardSize]*Cell
+	initialState   string
+	difficulty     Difficulty
+	givens         int
+	backTrackUsed  bool
+	strategiesUsed []string
 }
 
 // NewBoard returns new Sudoku board with the given input matrix, if there are any issues it also returns error
@@ -106,12 +129,18 @@ func NewBoard(input [BoardSize][BoardSize]Value) (*Board, error) {
 	if givens < 23 {
 		difficulty = Evil
 	}
-	return &Board{
-		data:          data,
-		difficulty:    difficulty,
-		givens:        givens,
-		backTrackUsed: false,
-	}, nil
+	board := &Board{
+		data:           data,
+		initialState:   "",
+		difficulty:     difficulty,
+		givens:         givens,
+		backTrackUsed:  false,
+		strategiesUsed: make([]string, 0),
+	}
+	// Storing the initial state before Solve method is called
+	board.initialState = board.getState()
+
+	return board, nil
 }
 
 // GetGivensAndBackTrack returns the givens and backTrackUsed flag
@@ -119,16 +148,38 @@ func (b *Board) GetGivensAndBackTrack() (int, bool) {
 	return b.givens, b.backTrackUsed
 }
 
+// addStrategy
+func (b *Board) addStrategy(strategy Strategy) {
+	for _, s := range b.strategiesUsed {
+		if s == strategy.ToString() {
+			// This strategy is already added, returning
+			return
+		}
+	}
+	// New strategy adding it
+	b.strategiesUsed = append(b.strategiesUsed, strategy.ToString())
+}
+
 // Solve is a utility function to start the solving process of given sudoku board
-func (b *Board) Solve() (bool, string, float64, error) {
+func (b *Board) Solve() *SolveResponse {
 	begin := time.Now()
 
-	threshold := 3
+	threshold := 1
 	emptyCycles := 0
 	info := make(map[int]int)
 
 	if computeErr := b.computeAllMarks(); computeErr != nil {
-		return false, b.getSolution(true), time.Since(begin).Seconds(), computeErr
+		return &SolveResponse{
+			Difficulty:       Levels[b.difficulty],
+			Givens:           b.givens,
+			InitialState:     b.initialState,
+			Solution:         b.getState(),
+			Duration:         time.Since(begin).Seconds(),
+			IsSolved:         false,
+			BackTrackingUsed: b.backTrackUsed,
+			StrategiesUsed:   b.strategiesUsed,
+			Error:            computeErr,
+		}
 
 	}
 	iteration := 0
@@ -148,7 +199,17 @@ func (b *Board) Solve() (bool, string, float64, error) {
 								cell.Value = Value(solution)
 								cell.Marks.Clear()
 								if computeErr := b.computeAllMarks(); computeErr != nil {
-									return false, b.getSolution(true), time.Since(begin).Seconds(), computeErr
+									return &SolveResponse{
+										Difficulty:       Levels[b.difficulty],
+										Givens:           b.givens,
+										InitialState:     b.initialState,
+										Solution:         b.getState(),
+										Duration:         time.Since(begin).Seconds(),
+										IsSolved:         false,
+										BackTrackingUsed: b.backTrackUsed,
+										StrategiesUsed:   b.strategiesUsed,
+										Error:            computeErr,
+									}
 								}
 							}
 						}
@@ -164,105 +225,226 @@ func (b *Board) Solve() (bool, string, float64, error) {
 
 		// Naked Quads strategy
 		if err := b.eliminateNQ(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		if b.hasUniqueSolutions() {
+			b.addStrategy(NakedQuadsStrategy)
 			continue
 		}
 
 		// Naked Triples strategy
 		if err := b.eliminateNT(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		if b.hasUniqueSolutions() {
+			b.addStrategy(NakedTriplesStrategy)
 			continue
 		}
 
 		// Naked Pairs strategy
 		if err := b.eliminateNP(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		if b.hasUniqueSolutions() {
+			b.addStrategy(NakedPairsStrategy)
 			continue
 		}
 
 		// XY Wings strategy
 		s := b.totalMarks()
 		if err := b.eliminateXYWings(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff := s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(XYWingsStrategy)
 			continue
 		}
 
 		// XYZ Wings strategy
 		s = b.totalMarks()
 		if err := b.eliminateXYZWings(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(XYZWingsStrategy)
 			continue
 		}
 
 		// XWings strategy
 		s = b.totalMarks()
 		if err := b.eliminateXWings(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(XWingsStrategy)
 			continue
 		}
 
 		// Sword Fish strategy
 		s = b.totalMarks()
 		if err := b.eliminateSwordFish(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(SwordFishStrategy)
 			continue
 		}
 
 		// Hidden Single strategy
 		s = b.totalMarks()
 		if err := b.eliminateHS(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(HiddenSingleStrategy)
 			continue
 		}
 
 		// Hidden Quads strategy
 		s = b.totalMarks()
 		if err := b.eliminateHQ(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() {
+			b.addStrategy(HiddenQuadsStrategy)
 			continue
 		}
 
 		// Hidden Triplets strategy
 		s = b.totalMarks()
 		if err := b.eliminateHT(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() {
+			b.addStrategy(HiddenTripletsStrategy)
 			continue
 		}
 
 		// Hidden Pairs strategy
 		s = b.totalMarks()
 		if err := b.eliminateHP(); err != nil {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), err
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            err,
+			}
 		}
 		diff = s - b.totalMarks()
 		if b.hasUniqueSolutions() || diff > 0 {
+			b.addStrategy(HiddenPairsStrategy)
 			continue
 		}
 
@@ -285,12 +467,42 @@ func (b *Board) Solve() (bool, string, float64, error) {
 		}
 	}
 	if b.isSolved() {
-		return true, b.getSolution(true), time.Since(begin).Seconds(), nil
+		return &SolveResponse{
+			Difficulty:       Levels[b.difficulty],
+			Givens:           b.givens,
+			InitialState:     b.initialState,
+			Solution:         b.getState(),
+			Duration:         time.Since(begin).Seconds(),
+			IsSolved:         true,
+			BackTrackingUsed: b.backTrackUsed,
+			StrategiesUsed:   b.strategiesUsed,
+			Error:            nil,
+		}
 	} else {
 		if b.hasInvalidMarks() {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), nil
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            errors.New("invalid board; some cells have invalid marks"),
+			}
 		} else {
-			return false, b.getSolution(true), time.Since(begin).Seconds(), nil
+			return &SolveResponse{
+				Difficulty:       Levels[b.difficulty],
+				Givens:           b.givens,
+				InitialState:     b.initialState,
+				Solution:         b.getState(),
+				Duration:         time.Since(begin).Seconds(),
+				IsSolved:         false,
+				BackTrackingUsed: b.backTrackUsed,
+				StrategiesUsed:   b.strategiesUsed,
+				Error:            errors.New("unable to find a solution"),
+			}
 		}
 	}
 }
@@ -369,14 +581,9 @@ func (b *Board) hasInvalidMarks() bool {
 	return false
 }
 
-// getSolution simply prints the board in well format
-func (b *Board) getSolution(showInfo bool) string {
+// getState returns the current state of the board
+func (b *Board) getState() string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Difficulty: %s\n", Levels[b.difficulty]))
-	builder.WriteString(fmt.Sprintf("Givens: %d\n", b.givens))
-	if showInfo {
-		builder.WriteString(fmt.Sprintf("BackTracking used: %t\n", b.backTrackUsed))
-	}
 	for i := 0; i < BoardSize; i++ {
 		if i%BlockSize == 0 {
 			builder.WriteString("*_______*_______*______*\n")
@@ -429,7 +636,6 @@ func (b *Board) computeAllMarks() error {
 			if !cell.IsSolved() {
 				cell.Marks = cell.ComputeCellMarks(b)
 				if cell.Marks.IsEmpty() {
-					fmt.Printf("%s\n", b.getSolution(true))
 					return fmt.Errorf("Compute All marks: Cell: %+v\n", cell)
 				}
 			}

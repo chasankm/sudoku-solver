@@ -6,7 +6,8 @@ import (
 
 // ParIntersect returns the intersection of all given units
 func ParIntersect(units ...*roaring.Bitmap) *roaring.Bitmap {
-	return roaring.ParAnd(0, units...)
+	// Since dataset is relatively small, parallelism performs worse than single thread
+	return roaring.ParAnd(1, units...)
 }
 
 // ParIntersectCells returns the intersection of all given cells
@@ -20,7 +21,8 @@ func ParIntersectCells(cells []*Cell) *roaring.Bitmap {
 
 // ParUnion returns the union of all given units
 func ParUnion(units ...*roaring.Bitmap) *roaring.Bitmap {
-	return roaring.ParOr(0, units...)
+	// Since dataset is relatively small, parallelism performs worse than single thread
+	return roaring.ParOr(1, units...)
 }
 
 // ParUnionCells returns the union of all given cells
