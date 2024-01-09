@@ -15,10 +15,43 @@ type Results struct {
 	Mutex     sync.Mutex
 }
 
-func (r *Results) Print() {
+func (r *Results) AddSolution(index int, solution *solver.SolveResponse) {
+	r.Mutex.Lock()
+	r.Solutions[index] = solution
+	r.Mutex.Unlock()
+}
+
+func (r *Results) PrintAll() {
 	indexes := make([]int, 0, len(r.Solutions))
 	for index := range r.Solutions {
 		indexes = append(indexes, index)
+	}
+	slices.Sort(indexes)
+	for _, index := range indexes {
+		solution, ok := r.Solutions[index]
+		if ok {
+			fmt.Printf("Index: %d\n", index)
+			fmt.Printf("%s", solution.Print())
+		}
+	}
+}
+
+func (r *Results) NumberOfUnsolved() int {
+	total := 0
+	for _, v := range r.Solutions {
+		if v.IsSolved == false {
+			total += 1
+		}
+	}
+	return total
+}
+
+func (r *Results) PrintUnsolved() {
+	indexes := make([]int, 0, len(r.Solutions))
+	for index, solution := range r.Solutions {
+		if solution.IsSolved == false {
+			indexes = append(indexes, index)
+		}
 	}
 	slices.Sort(indexes)
 	for _, index := range indexes {
@@ -38,9 +71,7 @@ func SolveBoardsInBatch(results *Results, boards map[int]*solver.Board) int {
 		go func(index int, results *Results, board *solver.Board, w *sync.WaitGroup) {
 			defer w.Done()
 			solveResponse := board.Solve()
-			results.Mutex.Lock()
-			results.Solutions[index] = solveResponse
-			results.Mutex.Unlock()
+			results.AddSolution(index, solveResponse)
 
 		}(idx, results, b, &wg)
 	}
@@ -58,7 +89,7 @@ func main() {
 
 	begin := time.Now()
 	total := 0
-	workers := runtime.NumCPU() / 2
+	workers := runtime.NumCPU()
 
 	fmt.Printf("Number of workers: %d\n", workers)
 	fmt.Printf("Number of boards parsed %d\n", len(boards))
@@ -91,7 +122,8 @@ func main() {
 	}
 
 	// Printing all results
-	result.Print()
+	result.PrintAll()
 
+	fmt.Printf("Number of unsolved boards %d\n", result.NumberOfUnsolved())
 	fmt.Printf("%d boards have been solved in parallel in %.2f seconds\n", total, time.Since(begin).Seconds())
 }
