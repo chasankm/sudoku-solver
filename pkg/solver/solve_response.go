@@ -21,7 +21,7 @@ func (r *SolveResponse) Print() string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Difficulty: %s\n", r.Difficulty))
 	builder.WriteString(fmt.Sprintf("Givens: %d\n", r.Givens))
-	builder.WriteString(fmt.Sprintf("Is Soved: %t\n", r.IsSolved))
+	builder.WriteString(fmt.Sprintf("Is Solved: %t\n", r.IsSolved))
 	builder.WriteString(fmt.Sprintf("BackTracking used: %t\n", r.BackTrackingUsed))
 	builder.WriteString(fmt.Sprintf("Strategies used: [%s]\n", strings.Join(r.StrategiesUsed, ", ")))
 	builder.WriteString(fmt.Sprintf("Duration: %.2f seconds\n", r.Duration))

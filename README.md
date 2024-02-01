@@ -40,7 +40,7 @@ go run cmd/main.go
 Index: 0
 Difficulty: Evil
 Givens: 17
-Is Soved: true
+Is Solved: true
 BackTracking used: false
 Strategies used: [Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads, Naked Triples]
 Duration: 6.14 seconds
@@ -75,7 +75,7 @@ Solution:
 Index: 1
 Difficulty: Evil
 Givens: 17
-Is Soved: true
+Is Solved: true
 BackTracking used: false
 Strategies used: [Naked Triples, Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads]
 Duration: 5.84 seconds
@@ -110,7 +110,7 @@ Solution:
 Index: 2
 Difficulty: Evil
 Givens: 17
-Is Soved: true
+Is Solved: true
 BackTracking used: false
 Strategies used: [Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads, Naked Triples]
 Duration: 6.47 seconds
