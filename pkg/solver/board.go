@@ -3,10 +3,8 @@ package solver
 import (
 	"errors"
 	"fmt"
-	"github.com/RoaringBitmap/roaring"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
@@ -36,29 +34,27 @@ var Levels = map[Difficulty]string{
 	Evil:   "Evil",
 }
 
-type Strategy string
+type StrategyName string
 
 const (
-	NakedQuadsStrategy     Strategy = "Naked Quads"
-	NakedTriplesStrategy   Strategy = "Naked Triples"
-	NakedPairsStrategy     Strategy = "Naked Pairs"
-	XYWingsStrategy        Strategy = "XY Wings"
-	XYZWingsStrategy       Strategy = "XYZ Wings"
-	XWingsStrategy         Strategy = "X Wings"
-	SwordFishStrategy      Strategy = "Sword Fish"
-	HiddenSingleStrategy   Strategy = "Hidden Single"
-	HiddenQuadsStrategy    Strategy = "Hidden Quads"
-	HiddenTripletsStrategy Strategy = "Hidden Triplets"
-	HiddenPairsStrategy    Strategy = "Hidden Pairs"
+	NakedQuadsStrategy     StrategyName = "Naked Quads"
+	NakedTriplesStrategy   StrategyName = "Naked Triples"
+	NakedPairsStrategy     StrategyName = "Naked Pairs"
+	XYWingsStrategy        StrategyName = "XY Wings"
+	XYZWingsStrategy       StrategyName = "XYZ Wings"
+	XWingsStrategy         StrategyName = "X Wings"
+	SwordFishStrategy      StrategyName = "Sword Fish"
+	HiddenSingleStrategy   StrategyName = "Hidden Single"
+	HiddenQuadsStrategy    StrategyName = "Hidden Quads"
+	HiddenTripletsStrategy StrategyName = "Hidden Triplets"
+	HiddenPairsStrategy    StrategyName = "Hidden Pairs"
 )
 
-func (s Strategy) ToString() string {
+func (s StrategyName) String() string {
 	return string(s)
 }
 
-var Digits = roaring.BitmapOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
-
-var ValidInputs = roaring.BitmapOf(uint32(EmptyCellValue), 1, 2, 3, 4, 5, 6, 7, 8, 9)
+var Digits = CandidateSetOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
 
 var HexMap = map[byte]Value{
 	0x2e: 0x00,
@@ -72,6 +68,15 @@ var HexMap = map[byte]Value{
 	0x37: 0x07,
 	0x38: 0x08,
 	0x39: 0x09,
+}
+
+var digitValues = [...]Value{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+func valueFromDigit(digit int) (Value, bool) {
+	if digit < 1 || digit > BoardSize {
+		return EmptyCellValue, false
+	}
+	return digitValues[digit], true
 }
 
 // Board is the struct of the Sudoku board
@@ -92,15 +97,15 @@ func NewBoard(input [BoardSize][BoardSize]Value) (*Board, error) {
 	for i := 0; i < BoardSize; i++ {
 		for j := 0; j < BoardSize; j++ {
 			value := input[i][j]
-			if !ValidInputs.Contains(uint32(value)) {
-				return nil, fmt.Errorf("%d is not valid input at [%d][%d]\n", value, i, j)
+			if value > Value(BoardSize) {
+				return nil, fmt.Errorf("%d is not valid input at [%d][%d]", value, i, j)
 			}
 			cell := &Cell{
 				ID:    id,
 				Row:   i,
 				Col:   j,
 				Value: input[i][j],
-				Marks: roaring.NewBitmap(),
+				Marks: 0,
 			}
 			data[i][j] = cell
 			id++
@@ -109,9 +114,11 @@ func NewBoard(input [BoardSize][BoardSize]Value) (*Board, error) {
 			}
 		}
 	}
+	if hasConflictingValues(data) {
+		return nil, errors.New("board contains conflicting givens")
+	}
 	if givens < MinimumGivens {
-		return nil, fmt.Errorf("At least %d cells should be given to find out unique solution."+
-			"Current givens: %d\n", MinimumGivens, givens)
+		return nil, fmt.Errorf("at least %d cells should be given to find out unique solution; current givens: %d", MinimumGivens, givens)
 	}
 	var difficulty Difficulty
 	if givens > 32 {
@@ -149,362 +156,15 @@ func (b *Board) GetGivensAndBackTrack() (int, bool) {
 }
 
 // addStrategy
-func (b *Board) addStrategy(strategy Strategy) {
+func (b *Board) addStrategy(strategy StrategyName) {
 	for _, s := range b.strategiesUsed {
-		if s == strategy.ToString() {
+		if s == strategy.String() {
 			// This strategy is already added, returning
 			return
 		}
 	}
 	// New strategy adding it
-	b.strategiesUsed = append(b.strategiesUsed, strategy.ToString())
-}
-
-// Solve is a utility function to start the solving process of given sudoku board
-func (b *Board) Solve() *SolveResponse {
-	begin := time.Now()
-
-	threshold := 1
-	emptyCycles := 0
-	info := make(map[int]int)
-
-	if computeErr := b.computeAllMarks(); computeErr != nil {
-		return &SolveResponse{
-			Difficulty:       Levels[b.difficulty],
-			Givens:           b.givens,
-			InitialState:     b.initialState,
-			Solution:         b.getState(),
-			Duration:         time.Since(begin).Seconds(),
-			IsSolved:         false,
-			BackTrackingUsed: b.backTrackUsed,
-			StrategiesUsed:   b.strategiesUsed,
-			Error:            computeErr,
-		}
-
-	}
-	iteration := 0
-	info[iteration] = b.emptyCells()
-
-	for {
-	solve:
-
-		if b.hasUniqueSolutions() {
-			for i := 0; i < BoardSize; i++ {
-				for j := 0; j < BoardSize; j++ {
-					cell := b.data[i][j]
-					if !cell.IsSolved() {
-						if cell.MarksLength() == 1 {
-							solution := cell.Marks.ToArray()[0]
-							if cell.IsValid(b, Value(solution)) {
-								cell.Value = Value(solution)
-								cell.Marks.Clear()
-								if computeErr := b.computeAllMarks(); computeErr != nil {
-									return &SolveResponse{
-										Difficulty:       Levels[b.difficulty],
-										Givens:           b.givens,
-										InitialState:     b.initialState,
-										Solution:         b.getState(),
-										Duration:         time.Since(begin).Seconds(),
-										IsSolved:         false,
-										BackTrackingUsed: b.backTrackUsed,
-										StrategiesUsed:   b.strategiesUsed,
-										Error:            computeErr,
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if b.hasUniqueSolutions() {
-			// There might be new solutions during the loop below, In that case, we should goto solve and continue
-			goto solve
-		}
-
-		// Naked Quads strategy
-		if err := b.eliminateNQ(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		if b.hasUniqueSolutions() {
-			b.addStrategy(NakedQuadsStrategy)
-			continue
-		}
-
-		// Naked Triples strategy
-		if err := b.eliminateNT(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		if b.hasUniqueSolutions() {
-			b.addStrategy(NakedTriplesStrategy)
-			continue
-		}
-
-		// Naked Pairs strategy
-		if err := b.eliminateNP(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		if b.hasUniqueSolutions() {
-			b.addStrategy(NakedPairsStrategy)
-			continue
-		}
-
-		// XY Wings strategy
-		s := b.totalMarks()
-		if err := b.eliminateXYWings(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff := s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(XYWingsStrategy)
-			continue
-		}
-
-		// XYZ Wings strategy
-		s = b.totalMarks()
-		if err := b.eliminateXYZWings(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(XYZWingsStrategy)
-			continue
-		}
-
-		// XWings strategy
-		s = b.totalMarks()
-		if err := b.eliminateXWings(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(XWingsStrategy)
-			continue
-		}
-
-		// Sword Fish strategy
-		s = b.totalMarks()
-		if err := b.eliminateSwordFish(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(SwordFishStrategy)
-			continue
-		}
-
-		// Hidden Single strategy
-		s = b.totalMarks()
-		if err := b.eliminateHS(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(HiddenSingleStrategy)
-			continue
-		}
-
-		// Hidden Quads strategy
-		s = b.totalMarks()
-		if err := b.eliminateHQ(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() {
-			b.addStrategy(HiddenQuadsStrategy)
-			continue
-		}
-
-		// Hidden Triplets strategy
-		s = b.totalMarks()
-		if err := b.eliminateHT(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() {
-			b.addStrategy(HiddenTripletsStrategy)
-			continue
-		}
-
-		// Hidden Pairs strategy
-		s = b.totalMarks()
-		if err := b.eliminateHP(); err != nil {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            err,
-			}
-		}
-		diff = s - b.totalMarks()
-		if b.hasUniqueSolutions() || diff > 0 {
-			b.addStrategy(HiddenPairsStrategy)
-			continue
-		}
-
-		iteration++
-		info[iteration] = b.emptyCells()
-		if info[iteration-1] == info[iteration] {
-			// Increasing the empty cycles
-			emptyCycles++
-		} else {
-			// We have some solutions, reset the empty cycles
-			emptyCycles = 0
-		}
-		if emptyCycles == threshold {
-			// Empty cycles reached to the threshold, giving up using strategies and using backtrack
-			b.backTrack()
-			break
-		}
-		if b.isSolved() {
-			break
-		}
-	}
-	if b.isSolved() {
-		return &SolveResponse{
-			Difficulty:       Levels[b.difficulty],
-			Givens:           b.givens,
-			InitialState:     b.initialState,
-			Solution:         b.getState(),
-			Duration:         time.Since(begin).Seconds(),
-			IsSolved:         true,
-			BackTrackingUsed: b.backTrackUsed,
-			StrategiesUsed:   b.strategiesUsed,
-			Error:            nil,
-		}
-	} else {
-		if b.hasInvalidMarks() {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            errors.New("invalid board; some cells have invalid marks"),
-			}
-		} else {
-			return &SolveResponse{
-				Difficulty:       Levels[b.difficulty],
-				Givens:           b.givens,
-				InitialState:     b.initialState,
-				Solution:         b.getState(),
-				Duration:         time.Since(begin).Seconds(),
-				IsSolved:         false,
-				BackTrackingUsed: b.backTrackUsed,
-				StrategiesUsed:   b.strategiesUsed,
-				Error:            errors.New("unable to find a solution"),
-			}
-		}
-	}
+	b.strategiesUsed = append(b.strategiesUsed, strategy.String())
 }
 
 // row returns the row in the given index
@@ -538,33 +198,7 @@ func (b *Board) emptyCells() int {
 
 // isSolved simply returns whether the board is solved or not
 func (b *Board) isSolved() bool {
-	return b.emptyCells() == 0
-}
-
-// solutions returns the number of marks with the given length
-func (b *Board) solutions(length int) int {
-	solutions := 0
-	for i := 0; i < BoardSize; i++ {
-		for j := 0; j < BoardSize; j++ {
-			cell := b.data[i][j]
-			if !cell.IsSolved() {
-				if cell.MarksLength() == length {
-					solutions++
-				}
-			}
-		}
-	}
-	return solutions
-}
-
-// uniqueSolutions returns the number of unique solutions (having single candidate)
-func (b *Board) uniqueSolutions() int {
-	return b.solutions(1)
-}
-
-// hasUniqueSolutions returns whether there are any unique solutions or not
-func (b *Board) hasUniqueSolutions() bool {
-	return b.uniqueSolutions() > 0
+	return b.emptyCells() == 0 && b.isValid()
 }
 
 // hasInvalidMarks returns whether board have invalid marks or not. This happens if the initial board is wrong
@@ -621,11 +255,11 @@ func (b *Board) unsolvedCells() []*Cell {
 
 // totalMarks returns the total marks/candidates of the unsolved cells
 func (b *Board) totalMarks() int {
-	total := uint64(0)
+	total := 0
 	for _, cell := range b.unsolvedCells() {
 		total += cell.Marks.GetCardinality()
 	}
-	return int(total)
+	return total
 }
 
 // computeAllMarks simply computes all marks/candidates of each unsolved cells
@@ -636,7 +270,7 @@ func (b *Board) computeAllMarks() error {
 			if !cell.IsSolved() {
 				cell.Marks = cell.ComputeCellMarks(b)
 				if cell.Marks.IsEmpty() {
-					return fmt.Errorf("Compute All marks: Cell: %+v\n", cell)
+					return fmt.Errorf("compute all marks: cell: %+v", cell)
 				}
 			}
 		}
@@ -778,7 +412,7 @@ func (b *Board) backTrack() bool {
 		for i := 0; i < BoardSize; i++ {
 			for j := 0; j < BoardSize; j++ {
 				b.data[i][j].Value = solution[i][j].Value
-				b.data[i][j].Marks.Clear()
+				b.data[i][j].Marks = b.data[i][j].Marks.Clear()
 			}
 		}
 		return true

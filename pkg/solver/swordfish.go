@@ -2,50 +2,36 @@ package solver
 
 import (
 	"fmt"
-
-	"github.com/RoaringBitmap/roaring"
 )
 
 type SwordFish struct {
 	Up     []*Cell
 	Middle []*Cell
 	Down   []*Cell
-	Mark   *roaring.Bitmap
+	Mark   CandidateSet
+	ByRows bool
 }
 
-func (s *SwordFish) ColsUnion() []uint32 {
-	upIndexes := IndexesBitmap(s.Up)
-	middleIndexes := IndexesBitmap(s.Middle)
-	downIndexes := IndexesBitmap(s.Down)
+func (s *SwordFish) TargetIndexes() []int {
+	upIndexes := IndexesBitmap(s.Up, s.ByRows)
+	middleIndexes := IndexesBitmap(s.Middle, s.ByRows)
+	downIndexes := IndexesBitmap(s.Down, s.ByRows)
 	union := ParUnion(upIndexes, middleIndexes, downIndexes)
-	return union.ToArray()
-}
-
-func (s *SwordFish) Print() {
-	fmt.Printf("\nSword Fish\n")
-	fmt.Printf("Mark: %s\n", s.Mark.String())
-	fmt.Printf("Up Part\n")
-	for _, cell := range s.Up {
-		fmt.Printf("Cell ID:[%d] --> [%d][%d] Marks: %s\n", cell.ID, cell.Row, cell.Col, cell.Marks.String())
+	indexes := union.ToArray()
+	for i := range indexes {
+		indexes[i]--
 	}
-	fmt.Printf("Middle Part\n")
-	for _, cell := range s.Middle {
-		fmt.Printf("Cell ID:[%d] --> [%d][%d] Marks: %s\n", cell.ID, cell.Row, cell.Col, cell.Marks.String())
-	}
-	fmt.Printf("Down Part\n")
-	for _, cell := range s.Down {
-		fmt.Printf("Cell ID:[%d] --> [%d][%d] Marks: %s\n", cell.ID, cell.Row, cell.Col, cell.Marks.String())
-	}
+	return indexes
 }
 
 func (s *SwordFish) Eliminate(b *Board) error {
-	for _, index := range s.ColsUnion() {
-		col := b.col(int(index))
-		for _, c := range col {
+	for _, index := range s.TargetIndexes() {
+		targetUnit := orthogonalLine(b, index, s.ByRows)
+		for _, c := range targetUnit {
 			if !c.IsSolved() && !IsCellInCollection(c, s.Up) && !IsCellInCollection(c, s.Middle) && !IsCellInCollection(c, s.Down) {
-				c.Marks.AndNot(s.Mark)
+				c.Marks = c.Marks.AndNot(s.Mark)
 				if c.Marks.IsEmpty() {
-					return fmt.Errorf("Invalid Board SwordFish: Empty marks: Cell: %+v\n", c)
+					return fmt.Errorf("invalid board: SwordFish: empty marks: cell: %+v", c)
 				}
 			}
 		}
@@ -55,15 +41,16 @@ func (s *SwordFish) Eliminate(b *Board) error {
 
 func EliminateSwordFish(b *Board) error {
 	swordFishes := make([]*SwordFish, 0)
-	for i := 0; i < BoardSize; i++ {
-		row := b.data[i]
-		yes, upCells, mark := HasSwordFishCandidates(row[:])
-		if yes {
-			yesMiddle, middleCells, index := SearchSwordFishMiddlePart(upCells, mark, i, b)
-			if yesMiddle {
-				yesDown, swordFish := SearchSwordFishDownPart(upCells, middleCells, mark, index, b)
-				if yesDown {
-					swordFishes = append(swordFishes, swordFish)
+	for _, byRows := range []bool{true, false} {
+		for i := 0; i < BoardSize; i++ {
+			yes, upCells, mark := HasSwordFishCandidates(line(b, i, byRows))
+			if yes {
+				yesMiddle, middleCells, index := SearchSwordFishMiddlePart(upCells, mark, i, b, byRows)
+				if yesMiddle {
+					yesDown, swordFish := SearchSwordFishDownPart(upCells, middleCells, mark, index, b, byRows)
+					if yesDown {
+						swordFishes = append(swordFishes, swordFish)
+					}
 				}
 			}
 		}
@@ -76,21 +63,21 @@ func EliminateSwordFish(b *Board) error {
 	return nil
 }
 
-func HasSwordFishCandidates(row []*Cell) (bool, []*Cell, *roaring.Bitmap) {
-	union := ParUnionCells(UnSolvedCells(row))
+func HasSwordFishCandidates(unit []*Cell) (bool, []*Cell, CandidateSet) {
+	union := ParUnionCells(UnSolvedCells(unit))
 	marks := BitmapSingles(union.ToArray())
 	for _, mark := range marks {
-		yes, cells := IsMarkAppearsTwiceOrThreeInRow(mark, row)
+		yes, cells := IsMarkAppearsTwiceOrThreeInUnit(mark, unit)
 		if yes {
 			return true, cells, mark
 		}
 	}
-	return false, nil, nil
+	return false, nil, 0
 }
 
-func IsMarkAppearsTwiceOrThreeInRow(mark *roaring.Bitmap, row []*Cell) (bool, []*Cell) {
+func IsMarkAppearsTwiceOrThreeInUnit(mark CandidateSet, unit []*Cell) (bool, []*Cell) {
 	cells := make([]*Cell, 0)
-	for _, cell := range row {
+	for _, cell := range unit {
 		if !cell.IsSolved() {
 			intersect := ParIntersect(mark, cell.Marks)
 			if intersect.GetCardinality() == 1 {
@@ -105,18 +92,15 @@ func IsMarkAppearsTwiceOrThreeInRow(mark *roaring.Bitmap, row []*Cell) (bool, []
 	return false, nil
 }
 
-func SearchSwordFishMiddlePart(upCells []*Cell, mark *roaring.Bitmap, rowIndex int, b *Board) (bool, []*Cell, int) {
-	if rowIndex+1 == BoardSize-1 {
+func SearchSwordFishMiddlePart(upCells []*Cell, mark CandidateSet, lineIndex int, b *Board, byRows bool) (bool, []*Cell, int) {
+	if lineIndex+1 == BoardSize-1 {
 		return false, nil, 0
 	}
-	for i := rowIndex + 1; i < BoardSize; i++ {
-		row := b.data[i]
-		yes, middleCells := IsMarkAppearsTwiceOrThreeInRow(mark, row[:])
+	for i := lineIndex + 1; i < BoardSize; i++ {
+		yes, middleCells := IsMarkAppearsTwiceOrThreeInUnit(mark, line(b, i, byRows))
 		if yes {
-			// Well we found that same mark also only appears twice or three times in this row.
-			// Let's also check whether the column indexes also match using sets
-			upIndexes := IndexesBitmap(upCells)
-			middleIndexes := IndexesBitmap(middleCells)
+			upIndexes := IndexesBitmap(upCells, byRows)
+			middleIndexes := IndexesBitmap(middleCells, byRows)
 			intersect := ParIntersect(upIndexes, middleIndexes)
 			cardinality := intersect.GetCardinality()
 			if cardinality == 1 || cardinality == 2 {
@@ -127,23 +111,23 @@ func SearchSwordFishMiddlePart(upCells []*Cell, mark *roaring.Bitmap, rowIndex i
 	return false, nil, 0
 }
 
-func SearchSwordFishDownPart(upCells []*Cell, middleCells []*Cell, mark *roaring.Bitmap, rowIndex int, b *Board) (bool, *SwordFish) {
-	if rowIndex+1 == BoardSize-1 {
+func SearchSwordFishDownPart(upCells []*Cell, middleCells []*Cell, mark CandidateSet, lineIndex int, b *Board, byRows bool) (bool, *SwordFish) {
+	if lineIndex+1 == BoardSize-1 {
 		return false, nil
 	}
-	for i := rowIndex + 1; i < BoardSize; i++ {
-		row := b.data[i]
-		yes, downCells := IsMarkAppearsTwiceOrThreeInRow(mark, row[:])
+	for i := lineIndex + 1; i < BoardSize; i++ {
+		yes, downCells := IsMarkAppearsTwiceOrThreeInUnit(mark, line(b, i, byRows))
 		if yes {
-			upIndexes := IndexesBitmap(upCells)
-			middleIndexes := IndexesBitmap(middleCells)
-			downIndexes := IndexesBitmap(downCells)
+			upIndexes := IndexesBitmap(upCells, byRows)
+			middleIndexes := IndexesBitmap(middleCells, byRows)
+			downIndexes := IndexesBitmap(downCells, byRows)
 			if ColumnsHasAtLeast2TimesTheValue(upIndexes, middleIndexes, downIndexes) {
 				return true, &SwordFish{
 					Up:     upCells,
 					Middle: middleCells,
 					Down:   downCells,
 					Mark:   mark,
+					ByRows: byRows,
 				}
 			}
 		}
@@ -151,20 +135,12 @@ func SearchSwordFishDownPart(upCells []*Cell, middleCells []*Cell, mark *roaring
 	return false, nil
 }
 
-func IndexesBitmap(cells []*Cell) *roaring.Bitmap {
-	indexes := roaring.NewBitmap()
-	for _, cell := range cells {
-		indexes.Add(uint32(cell.Col))
-	}
-	return indexes
-}
-
-func ColumnsHasAtLeast2TimesTheValue(up *roaring.Bitmap, middle *roaring.Bitmap, down *roaring.Bitmap) bool {
+func ColumnsHasAtLeast2TimesTheValue(up CandidateSet, middle CandidateSet, down CandidateSet) bool {
 	union := ParUnion(up, middle, down)
 	if union.GetCardinality() != 3 {
 		return false
 	}
-	histogram := make(map[uint32]int)
+	histogram := make(map[int]int)
 	// Each column should contain at least 2 shared cells
 	for _, index := range union.ToArray() {
 		if up.Contains(index) {

@@ -1,33 +1,40 @@
 package solver
 
 import (
-	"bytes"
+	"bufio"
 	"fmt"
-	"github.com/RoaringBitmap/roaring"
 	"os"
+	"path/filepath"
 )
 
 // ParseFile simply parses sudoku file and returns a sudoku board for each line
 func ParseFile(path string) ([]*Board, error) {
 	boards := make([]*Board, 0)
 
-	data, readFileErr := os.ReadFile(path)
-	if readFileErr != nil {
-		return nil, readFileErr
+	cleanPath := filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(cleanPath))
+	if err != nil {
+		return nil, err
 	}
-
-	reader := bytes.NewReader(data)
-	bufferSize := BoardSize*BoardSize + 1
-	buffer := make([]byte, bufferSize)
-
-	for {
-		n, readErr := reader.Read(buffer)
-		if readErr != nil {
-			break
+	defer func(root *os.Root) {
+		if cErr := root.Close(); cErr != nil {
+			fmt.Printf("Error closing root: %s\n", cErr.Error())
 		}
-		if n < bufferSize {
-			continue
+	}(root)
+
+	file, err := root.Open(filepath.Base(cleanPath))
+	if err != nil {
+		return nil, err
+	}
+	defer func(file *os.File) {
+		if cErr := file.Close(); cErr != nil {
+			fmt.Printf("Error closing file: %s\n", cErr.Error())
 		}
+	}(file)
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		buffer := append(append(make([]byte, 0, BoardSize*BoardSize+Offset), scanner.Bytes()...), EOL)
 		if !IsValidBuffer(buffer) {
 			continue
 		}
@@ -49,27 +56,10 @@ func ParseFile(path string) ([]*Board, error) {
 		}
 		boards = append(boards, board)
 	}
-	return boards, nil
-}
-
-// FindMarksOfUnit finds marks/candidates of the given unit by getting the difference (XOR) of solved cells
-// and all available digits
-func FindMarksOfUnit(unit []*Cell) *roaring.Bitmap {
-	solved := SolvedCells(unit)
-	digits := Digits.Clone()
-	digits.Xor(solved)
-	return digits
-}
-
-// SolvedCells creates marks from the solved cells within the unit
-func SolvedCells(cells []*Cell) *roaring.Bitmap {
-	marks := roaring.NewBitmap()
-	for _, cell := range cells {
-		if cell.IsSolved() {
-			marks.Add(uint32(cell.Value))
-		}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
-	return marks
+	return boards, nil
 }
 
 // UnSolvedCells returns the unsolved cells within the unit

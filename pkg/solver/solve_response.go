@@ -1,7 +1,7 @@
 package solver
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -19,21 +19,39 @@ type SolveResponse struct {
 
 func (r *SolveResponse) Print() string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Difficulty: %s\n", r.Difficulty))
-	builder.WriteString(fmt.Sprintf("Givens: %d\n", r.Givens))
-	builder.WriteString(fmt.Sprintf("Is Solved: %t\n", r.IsSolved))
-	builder.WriteString(fmt.Sprintf("BackTracking used: %t\n", r.BackTrackingUsed))
-	builder.WriteString(fmt.Sprintf("Strategies used: [%s]\n", strings.Join(r.StrategiesUsed, ", ")))
-	builder.WriteString(fmt.Sprintf("Duration: %.2f seconds\n", r.Duration))
+	builder.WriteString("Difficulty: ")
+	builder.WriteString(r.Difficulty)
+	builder.WriteByte('\n')
+	builder.WriteString("Givens: ")
+	builder.WriteString(strconv.Itoa(r.Givens))
+	builder.WriteByte('\n')
+	builder.WriteString("Is Solved: ")
+	builder.WriteString(strconv.FormatBool(r.IsSolved))
+	builder.WriteByte('\n')
+	builder.WriteString("BackTracking used: ")
+	builder.WriteString(strconv.FormatBool(r.BackTrackingUsed))
+	builder.WriteByte('\n')
+	builder.WriteString("Strategies used: [")
+	builder.WriteString(strings.Join(r.StrategiesUsed, ", "))
+	builder.WriteString("]\n")
+	builder.WriteString("Duration: ")
+	builder.WriteString(strconv.FormatFloat(r.Duration, 'f', 2, 64))
+	builder.WriteString(" seconds\n")
 	if r.Error != nil {
-		builder.WriteString(fmt.Sprintf("Error: %s\n", r.Error.Error()))
+		builder.WriteString("Error: ")
+		builder.WriteString(r.Error.Error())
+		builder.WriteByte('\n')
 	}
-	builder.WriteString(fmt.Sprintf("Initial state: \n%s\n", r.InitialState))
+	builder.WriteString("Initial state: \n")
+	builder.WriteString(r.InitialState)
+	builder.WriteByte('\n')
 	if r.IsSolved {
-		builder.WriteString(fmt.Sprintf("Solution: \n%s\n", r.Solution))
+		builder.WriteString("Solution: \n")
 	} else {
-		builder.WriteString(fmt.Sprintf("Last state: \n%s\n", r.Solution))
+		builder.WriteString("Last state: \n")
 	}
+	builder.WriteString(r.Solution)
+	builder.WriteByte('\n')
 
 	return builder.String()
 }

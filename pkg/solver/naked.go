@@ -15,9 +15,9 @@ func EliminateNakedPairs(units [][]*Cell) error {
 			marks := ParUnionCells(pair)
 			for _, cell := range unit {
 				if !IsCellInCollection(cell, pair) && !cell.IsSolved() {
-					cell.Marks.AndNot(marks)
+					cell.Marks = cell.Marks.AndNot(marks)
 					if cell.Marks.IsEmpty() {
-						return fmt.Errorf("Invalid Board NP: Empty marks: Cell: %+v\n", cell)
+						return fmt.Errorf("invalid board: NP: empty marks: cell: %+v", cell)
 					}
 				}
 			}
@@ -51,9 +51,9 @@ func EliminateNakedTriplets(units [][]*Cell) error {
 			marks := ParUnionCells(triplet)
 			for _, cell := range unit {
 				if !IsCellInCollection(cell, triplet) && !cell.IsSolved() {
-					cell.Marks.AndNot(marks)
+					cell.Marks = cell.Marks.AndNot(marks)
 					if cell.Marks.IsEmpty() {
-						return fmt.Errorf("Invalid Board NT: Empty marks: Cell: %+v\n", cell)
+						return fmt.Errorf("invalid board: NT: empty marks: cell: %+v", cell)
 					}
 				}
 			}
@@ -86,9 +86,9 @@ func EliminateNakedQuads(units [][]*Cell) error {
 			marks := ParUnionCells(quad)
 			for _, cell := range unit {
 				if !IsCellInCollection(cell, quad) && !cell.IsSolved() {
-					cell.Marks.AndNot(marks)
+					cell.Marks = cell.Marks.AndNot(marks)
 					if cell.Marks.IsEmpty() {
-						return fmt.Errorf("Invalid Board NQ: Empty marks: Cell: %+v\n", cell)
+						return fmt.Errorf("invalid board: NQ: empty marks: cell: %+v", cell)
 					}
 				}
 			}

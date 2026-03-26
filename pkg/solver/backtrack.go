@@ -1,56 +1,73 @@
 package solver
 
-import "math"
-
 func BackTrack(data [BoardSize][BoardSize]*Cell) (bool, [BoardSize][BoardSize]*Cell) {
-	solved, row, col := IsSolved(data)
+	solved, valid, row, col, candidates := nextBacktrackCell(data)
 	if solved {
 		return true, data
 	}
-	for _, num := range Digits.ToArray() {
-		if IsValidValue(data, row, col, Value(num)) {
-			data[row][col].Value = Value(num)
-			solved, _ := BackTrack(data)
-			if solved {
-				return true, data
-			}
-			data[row][col].Value = EmptyCellValue
+	if !valid {
+		return false, [BoardSize][BoardSize]*Cell{}
+	}
+	for _, num := range candidates.ToArray() {
+		value, ok := valueFromDigit(num)
+		if !ok {
+			return false, [BoardSize][BoardSize]*Cell{}
 		}
+		data[row][col].Value = value
+		solved, solution := BackTrack(data)
+		if solved {
+			return true, solution
+		}
+		data[row][col].Value = EmptyCellValue
 	}
 	return false, [BoardSize][BoardSize]*Cell{}
 }
 
-func IsSolved(data [BoardSize][BoardSize]*Cell) (bool, int, int) {
+func nextBacktrackCell(data [BoardSize][BoardSize]*Cell) (bool, bool, int, int, CandidateSet) {
+	bestCount := BoardSize + 1
+	bestRow, bestCol := -1, -1
+	var bestMarks CandidateSet
+
 	for i := 0; i < BoardSize; i++ {
 		for j := 0; j < BoardSize; j++ {
 			cell := data[i][j]
-			if cell.Value == EmptyCellValue {
-				return false, i, j
+			if cell.IsSolved() {
+				continue
+			}
+
+			marks := candidateSetForPosition(data, i, j)
+			if marks.IsEmpty() {
+				return false, false, -1, -1, 0
+			}
+
+			count := marks.GetCardinality()
+			if count < bestCount {
+				bestCount = count
+				bestRow = i
+				bestCol = j
+				bestMarks = marks
+				if count == 1 {
+					return false, true, bestRow, bestCol, bestMarks
+				}
 			}
 		}
 	}
-	return true, 0, 0
+
+	if bestRow == -1 {
+		return !hasConflictingValues(data), !hasConflictingValues(data), -1, -1, 0
+	}
+
+	return false, true, bestRow, bestCol, bestMarks
 }
 
 func IsValidValue(data [BoardSize][BoardSize]*Cell, row int, col int, value Value) bool {
-	for _, r := range Row(data, row) {
-		if r.Value == value {
-			return false
-		}
-	}
-	for _, r := range Col(data, col) {
-		if r.Value == value {
-			return false
-		}
-	}
-	for _, r := range Box(data, row, col) {
-		if r.Value == value {
+	for _, peerID := range peerIDs[cellID(row, col)] {
+		if cellByID(data, peerID).Value == value {
 			return false
 		}
 	}
 	return true
 }
-
 
 // Row returns the row in the given index
 func Row(data [BoardSize][BoardSize]*Cell, index int) []*Cell {
@@ -68,11 +85,7 @@ func Col(data [BoardSize][BoardSize]*Cell, index int) []*Cell {
 		return cells
 	}
 	for i := 0; i < BoardSize; i++ {
-		for j := 0; j < BoardSize; j++ {
-			if j == index {
-				cells = append(cells, data[i][j])
-			}
-		}
+		cells = append(cells, data[i][index])
 	}
 	return cells
 }
@@ -83,18 +96,11 @@ func Box(data [BoardSize][BoardSize]*Cell, rowID int, colID int) []*Cell {
 	if (rowID < 0 || rowID >= BoardSize) || (colID < 0 || colID >= BoardSize) {
 		return cells
 	}
-	rowMin := int(math.Floor(float64(rowID/BlockSize))) * BlockSize
-	rowMax := rowMin + BlockSize
-	colMin := int(math.Floor(float64(colID/BlockSize))) * BlockSize
-	colMax := colMin + BlockSize
-	for i := 0; i < BoardSize; i++ {
-		for j := 0; j < BoardSize; j++ {
-			if i >= rowMin && i < rowMax && j >= colMin && j < colMax {
-				cells = append(cells, data[i][j])
-			}
-			if len(cells) == BoardSize {
-				return cells
-			}
+	rowMin := (rowID / BlockSize) * BlockSize
+	colMin := (colID / BlockSize) * BlockSize
+	for i := rowMin; i < rowMin+BlockSize; i++ {
+		for j := colMin; j < colMin+BlockSize; j++ {
+			cells = append(cells, data[i][j])
 		}
 	}
 	return cells
@@ -110,7 +116,7 @@ func CloneData(data [BoardSize][BoardSize]*Cell) [BoardSize][BoardSize]*Cell {
 				Row:   cell.Row,
 				Col:   cell.Col,
 				Value: cell.Value,
-				Marks: cell.Marks.Clone(),
+				Marks: cell.Marks,
 			}
 		}
 	}

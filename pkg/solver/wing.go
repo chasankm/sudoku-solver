@@ -2,8 +2,6 @@ package solver
 
 import (
 	"fmt"
-
-	"github.com/RoaringBitmap/roaring"
 )
 
 type XYWing struct {
@@ -11,18 +9,26 @@ type XYWing struct {
 	Wings []*Cell
 }
 
-func (xy *XYWing) Union() *roaring.Bitmap {
-	return ParUnionCells(xy.Triplet())
+func (xy *XYWing) EliminatedMark() (CandidateSet, bool) {
+	common := ParIntersect(xy.Wings[0].Marks, xy.Wings[1].Marks)
+	if common.GetCardinality() != 1 {
+		return 0, false
+	}
+	if !ParIntersect(common, xy.Pivot.Marks).IsEmpty() {
+		return 0, false
+	}
+	return common, true
 }
 
 func (xy *XYWing) Eliminate(b *Board) error {
-	union := xy.Union()
-	union.AndNot(xy.Pivot.Marks)
-	marks := union.Clone()
+	marks, ok := xy.EliminatedMark()
+	if !ok {
+		return nil
+	}
 	for _, cell := range xy.WingsIntersect(b) {
-		cell.Marks.AndNot(marks)
+		cell.Marks = cell.Marks.AndNot(marks)
 		if cell.Marks.IsEmpty() {
-			return fmt.Errorf("Invalid Board XY: Empty marks: Cell: %+v\n", cell)
+			return fmt.Errorf("invalid board: XY: empty marks: cell: %+v", cell)
 		}
 	}
 	return nil
@@ -31,9 +37,7 @@ func (xy *XYWing) Eliminate(b *Board) error {
 func (xy *XYWing) Triplet() []*Cell {
 	triplet := make([]*Cell, 0, 3)
 	triplet = append(triplet, xy.Pivot)
-	for _, wing := range xy.Wings {
-		triplet = append(triplet, wing)
-	}
+	triplet = append(triplet, xy.Wings...)
 	return triplet
 }
 
@@ -49,15 +53,6 @@ func (xy *XYWing) WingsIntersect(b *Board) []*Cell {
 		}
 	}
 	return UnSolvedCells(intersect)
-}
-
-func (xy *XYWing) Print() {
-	fmt.Printf("\nXY Wing\n")
-	fmt.Printf("Pivot: %+v\n", xy.Pivot)
-	fmt.Printf("Wings\n")
-	for _, wing := range xy.Wings {
-		fmt.Printf("Wing: %+v\n", wing)
-	}
 }
 
 func EliminateXYWings(unsolved []*Cell, b *Board) error {
@@ -84,24 +79,22 @@ type XYZWing struct {
 	Wings []*Cell
 }
 
-func (xyz *XYZWing) Intersect() *roaring.Bitmap {
+func (xyz *XYZWing) Intersect() CandidateSet {
 	return ParIntersectCells(xyz.Triplet())
 }
 
 func (xyz *XYZWing) Triplet() []*Cell {
 	triplet := make([]*Cell, 0, 3)
 	triplet = append(triplet, xyz.Pivot)
-	for _, wing := range xyz.Wings {
-		triplet = append(triplet, wing)
-	}
+	triplet = append(triplet, xyz.Wings...)
 	return triplet
 }
 
 func (xyz *XYZWing) Eliminate(b *Board) error {
 	for _, cell := range xyz.XYZIntersect(b) {
-		cell.Marks.AndNot(xyz.Intersect())
+		cell.Marks = cell.Marks.AndNot(xyz.Intersect())
 		if cell.Marks.IsEmpty() {
-			return fmt.Errorf("Invalid Board XYZ: Empty marks: Cell: %+v\n", cell)
+			return fmt.Errorf("invalid board: XYZ: empty marks: cell: %+v", cell)
 		}
 	}
 	return nil
@@ -120,15 +113,6 @@ func (xyz *XYZWing) XYZIntersect(b *Board) []*Cell {
 		}
 	}
 	return UnSolvedCells(intersect)
-}
-
-func (xyz *XYZWing) Print() {
-	fmt.Printf("XYZ Wing\n")
-	fmt.Printf("Pivot: %+v\n", xyz.Pivot)
-	fmt.Printf("Wings\n")
-	for _, wing := range xyz.Wings {
-		fmt.Printf("Wing: %+v\n", wing)
-	}
 }
 
 func EliminateXYZWings(unsolved []*Cell, b *Board) error {
@@ -199,7 +183,12 @@ func IsTripletXYWingCandidate(triplet []*Cell, b *Board) (bool, *XYWing) {
 		// Pivot - wings intersect should be 1 element set
 		aIntersect := ParIntersect(xyWing.Pivot.Marks, xyWing.Wings[0].Marks)
 		bIntersect := ParIntersect(xyWing.Pivot.Marks, xyWing.Wings[1].Marks)
-		if aIntersect.GetCardinality() == 1 && bIntersect.GetCardinality() == 1 {
+		wingIntersect, ok := xyWing.EliminatedMark()
+		if aIntersect.GetCardinality() == 1 &&
+			bIntersect.GetCardinality() == 1 &&
+			aIntersect != bIntersect &&
+			ok &&
+			!wingIntersect.IsEmpty() {
 			return true, &xyWing
 		}
 	}
@@ -218,7 +207,7 @@ func IsPairRelated(pair []*Cell, board *Board) bool {
 
 func IsTripletHasSameCardinality(triplet []*Cell, cardinality int) bool {
 	for _, cell := range triplet {
-		if cell.Marks.GetCardinality() != uint64(cardinality) {
+		if cell.Marks.GetCardinality() != cardinality {
 			return false
 		}
 	}
@@ -245,80 +234,83 @@ func IsTripletXYZWingBasedOnCardinality(triplet []*Cell) bool {
 
 func IsTripletUnionHasCardinality(triplet []*Cell, cardinality int) bool {
 	union := ParUnionCells(triplet)
-	return union.GetCardinality() == uint64(cardinality)
+	return union.GetCardinality() == cardinality
 }
 
 type XWing struct {
-	Up   []*Cell
-	Down []*Cell
-	Mark *roaring.Bitmap
+	Up     []*Cell
+	Down   []*Cell
+	Mark   CandidateSet
+	ByRows bool
 }
 
-func (x *XWing) LeftCol(b *Board) ([]*Cell, error) {
-	if x.Up[0].Col != x.Down[0].Col {
-		return nil, fmt.Errorf("Inconsistency on LEFT col indexes: %+v\n", x)
+func line(b *Board, index int, byRows bool) []*Cell {
+	if byRows {
+		return b.row(index)
 	}
-	return b.col(x.Up[0].Col), nil
+	return b.col(index)
 }
 
-func (x *XWing) RightCol(b *Board) ([]*Cell, error) {
-	if x.Up[1].Col != x.Down[1].Col {
-		return nil, fmt.Errorf("Inconsistency on RIGHT col indexes: %+v\n", x)
+func orthogonalLine(b *Board, index int, byRows bool) []*Cell {
+	if byRows {
+		return b.col(index)
 	}
-	return b.col(x.Up[1].Col), nil
+	return b.row(index)
+}
+
+func IndexesBitmap(cells []*Cell, byRows bool) CandidateSet {
+	var indexes CandidateSet
+	for _, cell := range cells {
+		if byRows {
+			indexes = indexes.Add(cell.Col + 1)
+		} else {
+			indexes = indexes.Add(cell.Row + 1)
+		}
+	}
+	return indexes
+}
+
+func (x *XWing) TargetUnit(b *Board, wingIndex int) ([]*Cell, error) {
+	if x.ByRows {
+		if x.Up[wingIndex].Col != x.Down[wingIndex].Col {
+			return nil, fmt.Errorf("inconsistent X-Wing col indexes: %+v", x)
+		}
+		return orthogonalLine(b, x.Up[wingIndex].Col, x.ByRows), nil
+	}
+	if x.Up[wingIndex].Row != x.Down[wingIndex].Row {
+		return nil, fmt.Errorf("inconsistent X-Wing row indexes: %+v", x)
+	}
+	return orthogonalLine(b, x.Up[wingIndex].Row, x.ByRows), nil
 }
 
 func (x *XWing) Eliminate(b *Board) error {
-	leftColumn, leftColErr := x.LeftCol(b)
-	if leftColErr != nil {
-		return leftColErr
-	}
-	for _, cell := range leftColumn {
-		if !cell.IsSolved() && cell.ID != x.Up[0].ID && cell.ID != x.Down[0].ID {
-			cell.Marks.AndNot(x.Mark)
-			if cell.Marks.IsEmpty() {
-				return fmt.Errorf("Invalid Board X (LEFT): Empty marks: Cell: %+v\n", cell)
-			}
+	for wingIndex := range []int{0, 1} {
+		targetUnit, targetUnitErr := x.TargetUnit(b, wingIndex)
+		if targetUnitErr != nil {
+			return targetUnitErr
 		}
-	}
-
-	rightColumn, rightColErr := x.RightCol(b)
-	if rightColErr != nil {
-		return rightColErr
-	}
-	for _, cell := range rightColumn {
-		if !cell.IsSolved() && cell.ID != x.Up[1].ID && cell.ID != x.Down[1].ID {
-			cell.Marks.AndNot(x.Mark)
-			if cell.Marks.IsEmpty() {
-				return fmt.Errorf("Invalid Board X (RIGHT): Empty marks: Cell: %+v\n", cell)
+		for _, cell := range targetUnit {
+			if !cell.IsSolved() && cell.ID != x.Up[wingIndex].ID && cell.ID != x.Down[wingIndex].ID {
+				cell.Marks = cell.Marks.AndNot(x.Mark)
+				if cell.Marks.IsEmpty() {
+					return fmt.Errorf("invalid board: X: empty marks: cell: %+v", cell)
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func (x *XWing) Print() {
-	fmt.Printf("\nX Wing\n")
-	fmt.Printf("Mark: %s\n", x.Mark.String())
-	fmt.Printf("Up Part\n")
-	for _, cell := range x.Up {
-		fmt.Printf("Cell [%d][%d] Marks: %s\n", cell.Row, cell.Col, cell.Marks.String())
-	}
-	fmt.Printf("Down Part\n")
-	for _, cell := range x.Down {
-		fmt.Printf("Cell [%d][%d] Marks: %s\n", cell.Row, cell.Col, cell.Marks.String())
-	}
-}
-
 func EliminateXWings(b *Board) error {
 	xWings := make([]*XWing, 0)
-	for i := 0; i < BoardSize; i++ {
-		row := b.data[i]
-		yes, cells, mark := HasXCandidates(row[:])
-		if yes {
-			y, xWing := SearchDownPart(cells, mark, i, b)
-			if y {
-				xWings = append(xWings, xWing)
+	for _, byRows := range []bool{true, false} {
+		for i := 0; i < BoardSize; i++ {
+			yes, cells, mark := HasXCandidates(line(b, i, byRows))
+			if yes {
+				y, xWing := SearchDownPart(cells, mark, i, b, byRows)
+				if y {
+					xWings = append(xWings, xWing)
+				}
 			}
 		}
 	}
@@ -330,21 +322,21 @@ func EliminateXWings(b *Board) error {
 	return nil
 }
 
-func HasXCandidates(row []*Cell) (bool, []*Cell, *roaring.Bitmap) {
-	union := ParUnionCells(UnSolvedCells(row))
+func HasXCandidates(unit []*Cell) (bool, []*Cell, CandidateSet) {
+	union := ParUnionCells(UnSolvedCells(unit))
 	marks := BitmapSingles(union.ToArray())
 	for _, mark := range marks {
-		yes, cells := IsMarkAppearsTwiceInRow(mark, row)
+		yes, cells := IsMarkAppearsTwiceInUnit(mark, unit)
 		if yes {
 			return true, cells, mark
 		}
 	}
-	return false, nil, nil
+	return false, nil, 0
 }
 
-func IsMarkAppearsTwiceInRow(mark *roaring.Bitmap, row []*Cell) (bool, []*Cell) {
+func IsMarkAppearsTwiceInUnit(mark CandidateSet, unit []*Cell) (bool, []*Cell) {
 	cells := make([]*Cell, 0)
-	for _, cell := range row {
+	for _, cell := range unit {
 		if !cell.IsSolved() {
 			intersect := ParIntersect(mark, cell.Marks)
 			if intersect.GetCardinality() == 1 {
@@ -359,25 +351,22 @@ func IsMarkAppearsTwiceInRow(mark *roaring.Bitmap, row []*Cell) (bool, []*Cell) 
 	return false, nil
 }
 
-func SearchDownPart(upCells []*Cell, mark *roaring.Bitmap, rowIndex int, b *Board) (bool, *XWing) {
-	if rowIndex+1 == BoardSize-1 {
+func SearchDownPart(upCells []*Cell, mark CandidateSet, lineIndex int, b *Board, byRows bool) (bool, *XWing) {
+	if lineIndex+1 == BoardSize-1 {
 		return false, nil
 	}
-	for i := rowIndex + 1; i < BoardSize; i++ {
-		row := b.data[i]
-		yes, downCells := IsMarkAppearsTwiceInRow(mark, row[:])
+	for i := lineIndex + 1; i < BoardSize; i++ {
+		yes, downCells := IsMarkAppearsTwiceInUnit(mark, line(b, i, byRows))
 		if yes {
-			// Well we found that same mark also only appears twice in this row.
-			// Let's also check whether the column indexes also match using sets
-			upIndexes := IndexesBitmap(upCells)
-			downIndexes := IndexesBitmap(downCells)
+			upIndexes := IndexesBitmap(upCells, byRows)
+			downIndexes := IndexesBitmap(downCells, byRows)
 			intersect := ParIntersect(upIndexes, downIndexes)
 			if intersect.GetCardinality() == 2 {
-				// Indexes also match perfectly
 				return true, &XWing{
-					Up:   upCells,
-					Down: downCells,
-					Mark: mark,
+					Up:     upCells,
+					Down:   downCells,
+					Mark:   mark,
+					ByRows: byRows,
 				}
 			}
 		}

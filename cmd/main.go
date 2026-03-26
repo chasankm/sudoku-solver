@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"github.com/chasankm/sudoku-solver/pkg/solver"
 	"log"
 	"runtime"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/chasankm/sudoku-solver/pkg/solver"
 )
 
 type Results struct {
@@ -39,7 +40,7 @@ func (r *Results) PrintAll() {
 func (r *Results) NumberOfUnsolved() int {
 	total := 0
 	for _, v := range r.Solutions {
-		if v.IsSolved == false {
+		if !v.IsSolved {
 			total += 1
 		}
 	}
@@ -49,7 +50,7 @@ func (r *Results) NumberOfUnsolved() int {
 func (r *Results) PrintUnsolved() {
 	indexes := make([]int, 0, len(r.Solutions))
 	for index, solution := range r.Solutions {
-		if solution.IsSolved == false {
+		if !solution.IsSolved {
 			indexes = append(indexes, index)
 		}
 	}
