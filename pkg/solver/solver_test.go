@@ -144,11 +144,12 @@ func TestOrderedStrategiesUseExpectedOrder(t *testing.T) {
 		NakedQuadsStrategy,
 		NakedTriplesStrategy,
 		NakedPairsStrategy,
+		HiddenSingleStrategy,
+		LockedCandidatesStrategy,
 		XYWingsStrategy,
 		XYZWingsStrategy,
 		XWingsStrategy,
 		SwordFishStrategy,
-		HiddenSingleStrategy,
 		HiddenQuadsStrategy,
 		HiddenTripletsStrategy,
 		HiddenPairsStrategy,
@@ -204,6 +205,44 @@ func TestEliminateHiddenPairsFixture(t *testing.T) {
 	}
 	if board.data[0][1].Marks != CandidateSetOf(1, 2) {
 		t.Fatalf("second pair marks = %s, want {1,2}", board.data[0][1].Marks.String())
+	}
+}
+
+func TestEliminateLockedCandidatesPointingPair(t *testing.T) {
+	board, err := NewBoard(mustGridFromString(t, solvedBoard))
+	if err != nil {
+		t.Fatalf("NewBoard() error = %v", err)
+	}
+
+	setCandidates(board, 0, 0, 5, 1)
+	setCandidates(board, 0, 1, 5, 2)
+	setCandidates(board, 0, 3, 5, 6)
+
+	if err := board.eliminateLockedCandidates(); err != nil {
+		t.Fatalf("eliminateLockedCandidates() error = %v", err)
+	}
+
+	if board.data[0][3].Marks.Contains(5) {
+		t.Fatal("pointing pair did not eliminate candidate 5 from the row outside the box")
+	}
+}
+
+func TestEliminateLockedCandidatesClaimingPair(t *testing.T) {
+	board, err := NewBoard(mustGridFromString(t, solvedBoard))
+	if err != nil {
+		t.Fatalf("NewBoard() error = %v", err)
+	}
+
+	setCandidates(board, 0, 0, 7, 1)
+	setCandidates(board, 0, 1, 7, 2)
+	setCandidates(board, 1, 2, 7, 3)
+
+	if err := board.eliminateLockedCandidates(); err != nil {
+		t.Fatalf("eliminateLockedCandidates() error = %v", err)
+	}
+
+	if board.data[1][2].Marks.Contains(7) {
+		t.Fatal("claiming pair did not eliminate candidate 7 from the box outside the row")
 	}
 }
 

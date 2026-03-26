@@ -37,17 +37,18 @@ var Levels = map[Difficulty]string{
 type StrategyName string
 
 const (
-	NakedQuadsStrategy     StrategyName = "Naked Quads"
-	NakedTriplesStrategy   StrategyName = "Naked Triples"
-	NakedPairsStrategy     StrategyName = "Naked Pairs"
-	XYWingsStrategy        StrategyName = "XY Wings"
-	XYZWingsStrategy       StrategyName = "XYZ Wings"
-	XWingsStrategy         StrategyName = "X Wings"
-	SwordFishStrategy      StrategyName = "Sword Fish"
-	HiddenSingleStrategy   StrategyName = "Hidden Single"
-	HiddenQuadsStrategy    StrategyName = "Hidden Quads"
-	HiddenTripletsStrategy StrategyName = "Hidden Triplets"
-	HiddenPairsStrategy    StrategyName = "Hidden Pairs"
+	NakedQuadsStrategy       StrategyName = "Naked Quads"
+	NakedTriplesStrategy     StrategyName = "Naked Triples"
+	NakedPairsStrategy       StrategyName = "Naked Pairs"
+	LockedCandidatesStrategy StrategyName = "Locked Candidates"
+	XYWingsStrategy          StrategyName = "XY Wings"
+	XYZWingsStrategy         StrategyName = "XYZ Wings"
+	XWingsStrategy           StrategyName = "X Wings"
+	SwordFishStrategy        StrategyName = "Sword Fish"
+	HiddenSingleStrategy     StrategyName = "Hidden Single"
+	HiddenQuadsStrategy      StrategyName = "Hidden Quads"
+	HiddenTripletsStrategy   StrategyName = "Hidden Triplets"
+	HiddenPairsStrategy      StrategyName = "Hidden Pairs"
 )
 
 func (s StrategyName) String() string {
@@ -381,6 +382,11 @@ func (b *Board) eliminateHQ() error {
 		}
 	}
 	return nil
+}
+
+// eliminateLockedCandidates simply eliminates marks/candidates using pointing/claiming intersections.
+func (b *Board) eliminateLockedCandidates() error {
+	return EliminateLockedCandidates(b)
 }
 
 // eliminateXYWings simply eliminates marks/candidates using XY Wings strategy for the board
