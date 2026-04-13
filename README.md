@@ -1,145 +1,182 @@
-## sudoku-solver
+# sudoku-solver
 
-sudoku-solver is a simple application written in Go to solve any given sudoku board by using
-different strategies to eliminate candidates and as a last resort back tracking if strategies 
-do not produce any solutions anymore
+`sudoku-solver` is a Go Sudoku solver that combines human-style candidate elimination strategies with backtracking when logic alone stalls.
 
-The application uses the roaring bitmap https://github.com/RoaringBitmap/roaring for the set 
-operations the rest of the code are pure golang code.
+It can be used as:
 
-The solver algorithm uses sets of different strategies to eliminate the candidates and at some point
-if strategies do not eliminate the candidates anymore the algorithm starts backtracking to find 
-a unique valid solution by brute-forcing.
+- A CLI that parses puzzle files and solves boards in parallel
+- A Go package via `github.com/chasankm/sudoku-solver/pkg/solver`
 
-The strategies which are used in the algorithm
+The project is now pure Go and does not depend on external bitmap libraries.
 
-- Naked Quads strategy https://www.sudokuwiki.org/Naked_Candidates
-- Naked Triples strategy https://www.sudokuwiki.org/Naked_Candidates
-- Naked Pairs strategy https://www.sudokuwiki.org/Naked_Candidates
-- XY Wings strategy https://www.learn-sudoku.com/xy-wing.html
-- XYZ Wings strategy https://www.sudokuwiki.org/XYZ_Wing
-- XWings strategy https://www.sudokuwiki.org/X_Wing_Strategy
-- Sword Fish strategy https://www.sudokuwiki.org/Sword_Fish_Strategy
-- Hidden Single strategy https://www.sudokuwiki.org/Hidden_Candidates
-- Hidden Quads strategy https://www.sudokuwiki.org/Hidden_Candidates
-- Hidden Triplets strategy https://www.sudokuwiki.org/Hidden_Candidates
-- Hidden Pairs strategy https://www.sudokuwiki.org/Hidden_Candidates
+## Requirements
 
-The application parses two different board format which can be found on the data folder.
+- Go 1.25+
 
-Example usage; for instance if you parse easy50.txt file application solves
-board one by one and sample output is as below
+## What It Does
 
-In very rare cases application can not find unique solution or some inconsistency
-happens with the initial state of the board, in that cases the Solve method returns an error
-with the explanation and current state of the board.
+For each board, the solver:
 
+1. Validates the initial givens
+2. Initializes candidates for unsolved cells
+3. Resolves singles
+4. Applies advanced strategies in a fixed order
+5. Falls back to backtracking if the logical passes no longer make progress
 
+Backtracking uses a minimum-remaining-values style choice by selecting the unsolved cell with the fewest candidates first.
+
+## Implemented Strategies
+
+The current strategy pipeline is:
+
+- Naked Quads
+- Naked Triples
+- Naked Pairs
+- Hidden Single
+- Locked Candidates
+- XY Wings
+- XYZ Wings
+- X Wings
+- Sword Fish
+- Hidden Quads
+- Hidden Triplets
+- Hidden Pairs
+
+The solve response records which strategies were used for each puzzle and whether backtracking was required.
+
+## Input Format
+
+`ParseFile` reads one board per line.
+
+Supported cell values:
+
+- `1`-`9` for givens
+- `0` or `.` for empty cells
+
+Rules:
+
+- Each line must contain exactly 81 board characters
+- Invalid lines are skipped
+- Boards with conflicting givens are skipped
+- Boards with fewer than 17 givens are rejected
+
+Sample datasets are included in [data/easy50.txt](https://github.com/chasankm/sudoku-solver/blob/main/data/easy50.txt) and [data/top95.txt](https://github.com/chasankm/sudoku-solver/blob/main/data/top95.txt).
+
+## Run The CLI
+
+From the repository root:
+
+```bash
+go run ./cmd
 ```
-go run cmd/main.go
+
+The current CLI reads `./data/top95.txt`, solves boards in batches sized to `runtime.NumCPU()`, and prints:
+
+- Board index
+- Estimated difficulty from clue count
+- Number of givens
+- Solved status
+- Whether backtracking was used
+- Strategies used
+- Solve duration
+- Initial board state
+- Final board state
+
+Example:
+
+```text
+Number of workers: 16
+Number of boards parsed 95
+16 of 95 boards have been processed
+
 Index: 0
 Difficulty: Evil
 Givens: 17
 Is Solved: true
 BackTracking used: false
-Strategies used: [Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads, Naked Triples]
-Duration: 6.14 seconds
-Initial state: 
+Strategies used: [Naked Triples, Naked Pairs, Naked Quads, Hidden Single, Locked Candidates]
+Duration: 0.32 seconds
+Initial state:
 *_______*_______*______*
-| 4 _ _ | _ _ _ | 8 _ 5 
-| _ 3 _ | _ _ _ | _ _ _ 
-| _ _ _ | 7 _ _ | _ _ _ 
+| 4 _ _ | _ _ _ | 8 _ 5
+| _ 3 _ | _ _ _ | _ _ _
+| _ _ _ | 7 _ _ | _ _ _
 *_______*_______*______*
-| _ 2 _ | _ _ _ | _ 6 _ 
-| _ _ _ | _ 8 _ | 4 _ _ 
-| _ _ _ | _ 1 _ | _ _ _ 
+| _ 2 _ | _ _ _ | _ 6 _
+| _ _ _ | _ 8 _ | 4 _ _
+| _ _ _ | _ 1 _ | _ _ _
 *_______*_______*______*
-| _ _ _ | 6 _ 3 | _ 7 _ 
-| 5 _ _ | 2 _ _ | _ _ _ 
-| 1 _ 4 | _ _ _ | _ _ _ 
+| _ _ _ | 6 _ 3 | _ 7 _
+| 5 _ _ | 2 _ _ | _ _ _
+| 1 _ 4 | _ _ _ | _ _ _
 
-Solution: 
+Solution:
 *_______*_______*______*
-| 4 1 7 | 3 6 9 | 8 2 5 
-| 6 3 2 | 1 5 8 | 9 4 7 
-| 9 5 8 | 7 2 4 | 3 1 6 
-*_______*_______*______*
-| 8 2 5 | 4 3 7 | 1 6 9 
-| 7 9 1 | 5 8 6 | 4 3 2 
-| 3 4 6 | 9 1 2 | 7 5 8 
-*_______*_______*______*
-| 2 8 9 | 6 4 3 | 5 7 1 
-| 5 7 3 | 2 9 1 | 6 8 4 
-| 1 6 4 | 8 7 5 | 2 9 3 
+| 4 1 7 | 3 6 9 | 8 2 5
+| 6 3 2 | 1 5 8 | 9 4 7
+| 9 5 8 | 7 2 4 | 3 1 6
+...
+```
 
-Index: 1
-Difficulty: Evil
-Givens: 17
-Is Solved: true
-BackTracking used: false
-Strategies used: [Naked Triples, Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads]
-Duration: 5.84 seconds
-Initial state: 
-*_______*_______*______*
-| 5 2 _ | _ _ 6 | _ _ _ 
-| _ _ _ | _ _ _ | 7 _ 1 
-| 3 _ _ | _ _ _ | _ _ _ 
-*_______*_______*______*
-| _ _ _ | 4 _ _ | 8 _ _ 
-| 6 _ _ | _ _ _ | _ 5 _ 
-| _ _ _ | _ _ _ | _ _ _ 
-*_______*_______*______*
-| _ 4 1 | 8 _ _ | _ _ _ 
-| _ _ _ | _ 3 _ | _ 2 _ 
-| _ _ 8 | 7 _ _ | _ _ _ 
+## Use As A Library
 
-Solution: 
-*_______*_______*______*
-| 5 2 7 | 3 1 6 | 4 8 9 
-| 8 9 6 | 5 4 2 | 7 3 1 
-| 3 1 4 | 9 8 7 | 5 6 2 
-*_______*_______*______*
-| 1 7 2 | 4 5 3 | 8 9 6 
-| 6 8 9 | 2 7 1 | 3 5 4 
-| 4 5 3 | 6 9 8 | 2 1 7 
-*_______*_______*______*
-| 9 4 1 | 8 2 5 | 6 7 3 
-| 7 6 5 | 1 3 4 | 9 2 8 
-| 2 3 8 | 7 6 9 | 1 4 5 
+```go
+package main
 
-Index: 2
-Difficulty: Evil
-Givens: 17
-Is Solved: true
-BackTracking used: false
-Strategies used: [Naked Pairs, Hidden Single, Hidden Pairs, Naked Quads, Naked Triples]
-Duration: 6.47 seconds
-Initial state: 
-*_______*_______*______*
-| 6 _ _ | _ _ _ | 8 _ 3 
-| _ 4 _ | 7 _ _ | _ _ _ 
-| _ _ _ | _ _ _ | _ _ _ 
-*_______*_______*______*
-| _ _ _ | 5 _ 4 | _ 7 _ 
-| 3 _ _ | 2 _ _ | _ _ _ 
-| 1 _ 6 | _ _ _ | _ _ _ 
-*_______*_______*______*
-| _ 2 _ | _ _ _ | _ 5 _ 
-| _ _ _ | _ 8 _ | 6 _ _ 
-| _ _ _ | _ 1 _ | _ _ _ 
+import (
+	"fmt"
+	"log"
 
-Solution: 
-*_______*_______*______*
-| 6 1 7 | 4 5 9 | 8 2 3 
-| 2 4 8 | 7 3 6 | 9 1 5 
-| 5 3 9 | 1 2 8 | 4 6 7 
-*_______*_______*______*
-| 9 8 2 | 5 6 4 | 3 7 1 
-| 3 7 4 | 2 9 1 | 5 8 6 
-| 1 5 6 | 8 7 3 | 2 9 4 
-*_______*_______*______*
-| 8 2 3 | 6 4 7 | 1 5 9 
-| 7 9 1 | 3 8 5 | 6 4 2 
-| 4 6 5 | 9 1 2 | 7 3 8 
+	"github.com/chasankm/sudoku-solver/pkg/solver"
+)
 
+func main() {
+	boards, err := solver.ParseFile("./data/easy50.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for i, board := range boards {
+		result := board.Solve()
+		fmt.Printf("Board %d solved=%t backtracking=%t\n", i, result.IsSolved, result.BackTrackingUsed)
+		if result.Error != nil {
+			fmt.Println(result.Error)
+		}
+		fmt.Println(result.Print())
+	}
+}
+```
+
+`Solve()` returns a `SolveResponse` with:
+
+- `Difficulty`
+- `Givens`
+- `InitialState`
+- `Solution`
+- `Duration`
+- `IsSolved`
+- `BackTrackingUsed`
+- `StrategiesUsed`
+- `Error`
+
+## Validation Behavior
+
+The solver rejects invalid starting states early and also reports failures when a board reaches an inconsistent or unsolved terminal state. Typical failure reasons are:
+
+- Conflicting givens
+- Invalid candidate state
+- No solution found
+
+## Tests
+
+Run the test suite with:
+
+```bash
+go test ./...
+```
+
+The repository also includes a benchmark for the bundled `top95` dataset:
+
+```bash
+go test -bench=. ./pkg/solver
 ```
